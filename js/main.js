@@ -12,9 +12,10 @@ let canvas = null;
 let ctx = null;
 
 function point(origin) {
-    const radius = RADIUS * scale / 50;
+    // const radius = RADIUS * scale / 50;
+    const radius = RADIUS;
     ctx.beginPath();
-    origin = origin.mul(scale).add(ORIGIN);
+    origin = origin.mul(scale / Math.max(1, v_num + 1)).add(ORIGIN);
     ctx.arc(origin.x, origin.y, radius, 0, 2 * Math.PI, false);
     ctx.fillStyle = FILL_POINT;
     ctx.fill();
@@ -22,8 +23,8 @@ function point(origin) {
 
 function line(origin, destination) {
     ctx.beginPath();
-    origin = origin.mul(scale).add(ORIGIN);
-    destination = destination.mul(scale).add(ORIGIN);
+    origin = origin.mul(scale / Math.max(1, v_num + 1)).add(ORIGIN);
+    destination = destination.mul(scale / Math.max(1, v_num + 1)).add(ORIGIN);
     ctx.moveTo(origin.x, origin.y);
     ctx.lineTo(destination.x, destination.y);
     ctx.strokeStyle = FILL_LINE;
@@ -33,9 +34,9 @@ function line(origin, destination) {
 function triangle(origin, a, b, fill) {
     // Draw a filled triangle
     ctx.beginPath();
-    origin = origin.mul(scale).add(ORIGIN);
-    a = a.mul(scale).add(ORIGIN);
-    b = b.mul(scale).add(ORIGIN);
+    origin = origin.mul(scale / Math.max(1, v_num + 1)).add(ORIGIN);
+    a = a.mul(scale / Math.max(1, v_num + 1)).add(ORIGIN);
+    b = b.mul(scale / Math.max(1, v_num + 1)).add(ORIGIN);
     ctx.moveTo(origin.x, origin.y);
     ctx.lineTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -45,7 +46,7 @@ function triangle(origin, a, b, fill) {
 
 // Returns the location of the point for the intersection of 60 degree lines with offsets p and q
 function intersect60(p, q) {
-    const m = 1.0 / Math.sqrt(3);
+    const m = 1.0 / Math.sqrt(3.0);
     const y = (q - p) / 2.0 / m;
     const x = (p + q) / 2.0;
     return new Point(x, y);
@@ -91,7 +92,6 @@ function generateDomeFace(v) {
     }
     // Draw the points on top
     for (let p = 0; p < layers.length; p++) {
-        // First connect adjacent points in the same layer
         const layer = layers[p];
         for (let q = 0; q < layer.length; q++) {
             point(layer[q]);
@@ -116,7 +116,7 @@ function init() {
     // Set the canvas width and height
     canvas.width = SIZE.x;
     canvas.height = SIZE.y;
-    generateDomeFace(1);
+    generateDomeFace(v_num);
 }
 
 function clearCanvas() {
