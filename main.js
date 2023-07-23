@@ -31,8 +31,8 @@ function init() {
     document.body.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
-    // camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 200);
-    camera = new THREE.OrthographicCamera(window.innerWidth / -600, window.innerWidth / 600, window.innerHeight / 600, window.innerHeight / -600, 1, 200);
+    camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 200);
+    // camera = new THREE.OrthographicCamera(window.innerWidth / -600, window.innerWidth / 600, window.innerHeight / 600, window.innerHeight / -600, 1, 200);
     camera.position.set(-1.5, 2.5, 3.0);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -177,6 +177,7 @@ function drawDome() {
     const edges = [];
     const edgeColors = [];
     const ind = [];
+    const edgeIndices = [];
     console.log(pointColors);
     const addEdge = (i, j) => {
         if (i === j) return;
@@ -185,6 +186,7 @@ function drawDome() {
             throw new Error('Edge already exists');
         }
         ind.push([i, j].sort().toString());
+        edgeIndices.push([i, j].sort());
         edges.push(new THREE.Line3(points[i], points[j]));
         edgeColors.push(pointColors[i]);
         edgeColors.push(pointColors[j]);
@@ -208,6 +210,8 @@ function drawDome() {
         }
     }
     console.log(edges.length);
+    edgeIndices.sort();
+    console.log(edgeIndices);
     // let e = [
     //     [0, 3],
     //     [0, 4],
@@ -227,8 +231,8 @@ function drawDome() {
     // Populate the arrays
     for (let i = 0; i < edges.length; i++) {
         const edge = edges[i];
-        const color1 = edgeColors[i*2];
-        const color2 = edgeColors[i*2 + 1];
+        const color1 = edgeColors[i * 2];
+        const color2 = edgeColors[i * 2 + 1];
         // console.log(edge);
         edgesVertices[i * 2 * 3 + 0] = edge.start.x;
         edgesVertices[i * 2 * 3 + 1] = edge.start.y;
@@ -252,6 +256,86 @@ function drawDome() {
     // Add the line to the scene
     scene.add(lineObject);
     // scene.add(lineObject2);
+
+    // Create the faces
+    // Create the triangle index array
+    // Determine all unique combinations of 3 edges
+    const indices = [];
+    let indS = [];
+    for (let i = 0; i < edgeIndices.length; i++) {
+        // indices.push([i, (i + 1) % N_VERTICES, (i + 2) % N_VERTICES]);
+        for (let j = 0; j < edgeIndices.length; j++) {
+            if (i === j) continue;
+            const e1 = edgeIndices[i];
+            const e2 = edgeIndices[j];
+            let shared = -1;
+            let not_shared = [-1, -1];
+            // Check that the adges share a vertex
+            for (let k = 0; k < 2; k++) {
+                if ((not_shared[1] = e2.indexOf(e1[k])) !== -1) {
+                    // They share 1 vertex
+                    shared = e1[k];
+                    // Store the other 2 vertices
+                    not_shared[0] = e1[(k + 1) % 2];
+                    not_shared[1] = e2[(not_shared[1] + 1) % 2];
+                    // console.log(e1, e2, not_shared);
+                    break;
+                }
+            }
+            if (not_shared[0] === -1) continue;
+            // Find the third edge if it exists
+            not_shared.sort();
+            // console.log(edgeIndices.map((e) => e.toString()));
+            const l = edgeIndices.map((e) => e.toString()).indexOf(not_shared.toString());
+            // console.log(edgeIndices.map((e) => e.toString())[l], not_shared.toString());
+            if (l !== -1) {
+                // Check that we haven't already added this triangle
+                // const s = new Set([...indS, edgeIndices[l]]);
+                const n = [shared, not_shared[0], not_shared[1]];
+                n.sort();
+                if (indS.indexOf(n.sort().toString()) !== -1) {
+                    // console.log('Already added');
+                    continue;
+                }
+                // indS = s;
+                indS.push(n.sort().toString());
+                indices.push(n);
+                // console.log(shared, not_shared[0], not_shared[1]);
+            }
+
+            // for (let k = j + 1; k < edgeIndices.length; k++) {
+            //     if (i === k || j === k) continue;
+            //     const e3 = edgeIndices[k];
+            //     const s = new Set([...e1, ...e2, ...e3]);
+            //     if (s.size === 3) {
+            //         indices.push([i, j, k]);
+            //     }
+            // }
+        }
+    }
+    indices.sort();
+    console.log(indices);
+    const trianglesFlat = new Uint16Array(indices.length);
+    for (let i = 0; i < indices.length; i++) {
+        trianglesFlat[i * 3] = indices[i][0];
+        trianglesFlat[i * 3 + 1] = indices[i][1];
+        trianglesFlat[i * 3 + 2] = indices[i][2];
+    }
+    // Create material
+    const faceMaterial = new THREE.MeshToonMaterial({ side: THREE.DoubleSide, vertexColors: true });
+    faceMaterial.flatShading = true;
+    // Create geometry
+    // const faceGeometry = new THREE.BufferGeometry();
+    // // Create attributes
+    // faceGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    // faceGeometry.setIndex(trianglesFlat);
+    // Create the mesh
+    // const faceMesh = new THREE.Mesh(faceGeometry, faceMaterial);
+    geometry.setIndex(indices.flat());
+    const faceMesh = new THREE.Mesh(geometry, faceMaterial);
+    // Add the mesh to the scene
+    scene.add(faceMesh);
+    // scene.add(mesh);
 }
 
 // function drawLine() {
