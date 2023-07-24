@@ -3,11 +3,15 @@ import WebGL from 'three/addons/capabilities/WebGL.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+const CAM_PERSPECTIVE = 0;
+const CAM_ORTHO = 1;
+
 let camera, scene, renderer;
 const params = {
     v_num: 0,
     showHelpers: false,
     showText: false,
+    camera: CAM_ORTHO,
 };
 const N_VERTICES = 12;
 // const N_EDGES = N_VERTICES * 2;
@@ -28,11 +32,19 @@ function init() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.useLegacyLights = false;
     renderer.localClippingEnabled = true;
+
+    // Remove renderer if it already exists
+    if (document.body.contains(renderer.domElement)) {
+        document.body.removeChild(renderer.domElement);
+    }
     document.body.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 200);
-    // camera = new THREE.OrthographicCamera(window.innerWidth / -600, window.innerWidth / 600, window.innerHeight / 600, window.innerHeight / -600, 1, 200);
+    const camera_perspective = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 200);
+    const camera_ortho = new THREE.OrthographicCamera(window.innerWidth / -600, window.innerWidth / 600, window.innerHeight / 600, window.innerHeight / -600, 1, 200);
+
+    // Select camera based on params
+    camera = params.camera === CAM_PERSPECTIVE ? camera_perspective : camera_ortho;
     camera.position.set(-1.5, 2.5, 3.0);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -41,12 +53,22 @@ function init() {
     controls.maxDistance = 10;
     controls.enablePan = false;
 
-    const light = new THREE.HemisphereLight(0xffffff, 0x080808, 4.5);
-    light.position.set(-1.25, 1, 1.25);
-    scene.add(light);
+    const light1 = new THREE.HemisphereLight(0xffffff, 0x080808, 4.5);
+    light1.position.set(-1.25, 1, 1.25);
+    const light2 = new THREE.HemisphereLight(0xffffff, 0x080808, 4.5);
+    light2.position.set(1.25, 1, -1.25);
+    light2.intensity = 0.5;
+    scene.add(light1);
+    scene.add(light2);
 
     // GUI
     const gui = new GUI();
+    // // Add camera selector
+    // gui.add(params, 'camera', { perspective: CAM_PERSPECTIVE, orthographic: CAM_ORTHO }).name('camera').onChange((value) => {
+    //     params.camera = value;
+    //     camera = params.camera === CAM_PERSPECTIVE ? camera_perspective : camera_ortho;
+    //     onWindowResize();
+    // });
     gui.add(params, 'v_num', 0, 100).step(1).onChange(render);
     // Add toggle for xyz axes
     const helpers = new THREE.AxesHelper(5);
@@ -77,10 +99,12 @@ function onWindowResize() {
 }
 
 function render() {
-    // // Make all labels face the camera
-    // for (let i = 0; i < N_VERTICES; i++) {
-    //     labels[i].lookAt(camera.position);
-    // }
+    if (labels.length > 0) {
+        // Make all labels face the camera
+        for (let i = 0; i < N_VERTICES; i++) {
+            labels[i].lookAt(camera.position);
+        }
+    }
 
     renderer.render(scene, camera);
 }
@@ -118,11 +142,9 @@ function drawDome() {
         zi %= 3;
         // console.log(xi, yi, zi);
         // Copy original point with index offsets and negate either x or y coord (z is always 0)
+        // The edge generation is highly dependent on the order of the points
         const x_neg = -2 * ((i + 0) / 2 % 2 >= 1) + 1;
         const y_neg = -2 * ((i + 1) / 2 % 2 >= 1) + 1;
-        // const x_neg = -2 * (i % 2 >= 1) + 1;
-        // const y_neg = -2 * (i % 4 >= 2) + 1;
-        // console.log(x_neg, y_neg);
         console.log(
             xi * (xi === 0 ? x_neg : 1) * (xi == 1 ? y_neg : 1),
             yi * (yi === 0 ? x_neg : 1) * (yi == 1 ? y_neg : 1),
@@ -194,7 +216,7 @@ function drawDome() {
     // Generate the edges
     for (let i = 0; i < N_VERTICES; i++) {
         addEdge(i, (i + 3) % N_VERTICES);
-        // See https://upload.wikimedia.org/wikipedia/commons/6/60/Octant_numbers.svg
+        // These patterns create the edges of the icosahedron with no duplicates based on the ordering of the points
         if (i % 2 === 0) {
             addEdge(i, (i + 4) % N_VERTICES);
         }
@@ -212,19 +234,6 @@ function drawDome() {
     console.log(edges.length);
     edgeIndices.sort();
     console.log(edgeIndices);
-    // let e = [
-    //     [0, 3],
-    //     [0, 4],
-    //     [0, 6],
-    //     [0, 7],
-    //     [0, 8],
-    //     // [0, 10],
-    // ];
-    // for (let j = 0; j < e.length; j++) {
-    //     addEdge(e[j][0], e[j][1]);
-    //     edgeColors.push(new THREE.Color(1, 1, 1));
-    //     edgeColors.push(new THREE.Color(1, 1, 1));
-    // }
     // Create arrays for the vertices and colors
     const edgesVertices = new Float32Array(N_EDGES * 2 * 3);
     const edgesVertexColors = new Float32Array(N_EDGES * 2 * 3);
@@ -255,6 +264,7 @@ function drawDome() {
     const lineObject2 = new THREE.Line(geometry, edgesMaterial);
     // Add the line to the scene
     scene.add(lineObject);
+    // Use this to draw the order of the points
     // scene.add(lineObject2);
 
     // Create the faces
@@ -263,7 +273,6 @@ function drawDome() {
     const indices = [];
     let indS = [];
     for (let i = 0; i < edgeIndices.length; i++) {
-        // indices.push([i, (i + 1) % N_VERTICES, (i + 2) % N_VERTICES]);
         for (let j = 0; j < edgeIndices.length; j++) {
             if (i === j) continue;
             const e1 = edgeIndices[i];
@@ -290,31 +299,30 @@ function drawDome() {
             // console.log(edgeIndices.map((e) => e.toString())[l], not_shared.toString());
             if (l !== -1) {
                 // Check that we haven't already added this triangle
-                // const s = new Set([...indS, edgeIndices[l]]);
                 const n = [shared, not_shared[0], not_shared[1]];
                 n.sort();
                 if (indS.indexOf(n.sort().toString()) !== -1) {
                     // console.log('Already added');
                     continue;
                 }
-                // indS = s;
                 indS.push(n.sort().toString());
                 indices.push(n);
                 // console.log(shared, not_shared[0], not_shared[1]);
             }
-
-            // for (let k = j + 1; k < edgeIndices.length; k++) {
-            //     if (i === k || j === k) continue;
-            //     const e3 = edgeIndices[k];
-            //     const s = new Set([...e1, ...e2, ...e3]);
-            //     if (s.size === 3) {
-            //         indices.push([i, j, k]);
-            //     }
-            // }
         }
     }
     indices.sort();
     console.log(indices);
+    indices.forEach((i) => {
+        const p0 = points[i[0]];
+        const p1 = points[i[1]];
+        const p2 = points[i[2]];
+        const q0 = [p0.x, p0.y, p0.z];
+        const q1 = [p1.x, p1.y, p1.z];
+        const q2 = [p2.x, p2.y, p2.z];
+        console.log(q0, q1, q2);
+        // console.log(points[i[0]], points[i[1]], points[i[2]]);
+    });
     const trianglesFlat = new Uint16Array(indices.length);
     for (let i = 0; i < indices.length; i++) {
         trianglesFlat[i * 3] = indices[i][0];
@@ -324,18 +332,10 @@ function drawDome() {
     // Create material
     const faceMaterial = new THREE.MeshToonMaterial({ side: THREE.DoubleSide, vertexColors: true });
     faceMaterial.flatShading = true;
-    // Create geometry
-    // const faceGeometry = new THREE.BufferGeometry();
-    // // Create attributes
-    // faceGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-    // faceGeometry.setIndex(trianglesFlat);
-    // Create the mesh
-    // const faceMesh = new THREE.Mesh(faceGeometry, faceMaterial);
     geometry.setIndex(indices.flat());
     const faceMesh = new THREE.Mesh(geometry, faceMaterial);
     // Add the mesh to the scene
     scene.add(faceMesh);
-    // scene.add(mesh);
 }
 
 // function drawLine() {
@@ -351,22 +351,22 @@ function drawDome() {
 //     return line;
 // }
 
-function createTextSprite(message, color) {
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    context.font = '24px Arial';
-    context.fillStyle = color;
-    context.fillText(message, 0, 24);
+// function createTextSprite(message, color) {
+//     const canvas = document.createElement('canvas');
+//     const context = canvas.getContext('2d');
+//     context.font = '24px Arial';
+//     context.fillStyle = color;
+//     context.fillText(message, 0, 24);
 
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture });
-    const sprite = new THREE.Sprite(material);
+//     const texture = new THREE.CanvasTexture(canvas);
+//     const material = new THREE.SpriteMaterial({ map: texture });
+//     const sprite = new THREE.Sprite(material);
 
-    // Set the sprite scale
-    sprite.scale.set(1, 0.5, 1);
+//     // Set the sprite scale
+//     sprite.scale.set(1, 0.5, 1);
 
-    return sprite;
-}
+//     return sprite;
+// }
 
 function createTextLabel(text, color) {
     const canvas = document.createElement('canvas');
