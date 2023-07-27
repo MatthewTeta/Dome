@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as math from 'mathjs';
 import WebGL from 'three/addons/capabilities/WebGL.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -8,13 +9,14 @@ const CAM_ORTHO = 1;
 
 let camera, scene, renderer;
 const params = {
-    v_num: 0,
+    v_num: 1,
     showHelpers: false,
     showText: false,
-    camera: CAM_ORTHO,
+    camera: CAM_PERSPECTIVE,
 };
 const N_VERTICES = 12;
-// const N_EDGES = N_VERTICES * 2;
+const FILL_TRIANGLE = new THREE.Color(0xff0000);
+const FILL_TRIANGLE2 = new THREE.Color(0x0000ff);
 const N_EDGES = 30;
 let labels = [];
 
@@ -155,7 +157,9 @@ function drawDome() {
         let y = p0[1] * y_neg;
         let z = p0[2];
         // Also swap for the points array
-        const p = [x, y, z];
+        let p = [x, y, z];
+        // normalize the point
+        p = math.multiply(p, 1 / math.norm(p));
         const p2 = [p[xi], p[yi], p[zi]];
         vertices[i * 3 + 0] = p[xi];
         vertices[i * 3 + 1] = p[yi];
@@ -187,7 +191,7 @@ function drawDome() {
             labels.push(label);
         }
     }
-    scene.add(pointsGeometry);
+    // scene.add(pointsGeometry);
 
     // Create the edges
     // Create a material
@@ -263,7 +267,7 @@ function drawDome() {
     const lineObject = new THREE.LineSegments(edgesGeometry, edgesMaterial);
     const lineObject2 = new THREE.Line(geometry, edgesMaterial);
     // Add the line to the scene
-    scene.add(lineObject);
+    // scene.add(lineObject);
     // Use this to draw the order of the points
     // scene.add(lineObject2);
 
@@ -335,7 +339,271 @@ function drawDome() {
     geometry.setIndex(indices.flat());
     const faceMesh = new THREE.Mesh(geometry, faceMaterial);
     // Add the mesh to the scene
-    scene.add(faceMesh);
+    // scene.add(faceMesh);
+
+    // Draw all of the normal vectors as lines from the triangle centers
+    let triangles = indices.map((i) => [points[i[0]], points[i[1]], points[i[2]]]);
+    triangles = triangles.map((t) => t.map((p) => [p.x, p.y, p.z]));
+    // Sort in order to get outward facing normals -- Put the most negative point first
+    // triangles = triangles.map((t) => t.sort((a, b) => math.subtract(math.sum(a), math.sum(b))));
+    triangles = triangles.map((t) => math.transpose(t));
+    triangles.forEach((t, i) => printMatrix(t, `Triangle ${i}`));
+    triangles.forEach((t, i) => [0, 0, 0].forEach((_, j) => console.log(`Triangle ${i}, ${j}`, math.norm(math.flatten(math.column(t, j))))));
+    const normals = triangles.map((t) => getNormalVector(t));
+    const centroids = triangles.map((t) => findTriangleCentroid(t));
+    // triangles.forEach((t, i) => drawVector(centroids[i], normals[i], 0.1));
+
+    // Subdivide the triangles
+    const v = params.v_num;
+    const face_base = generateDomeFace(v);
+    const face_points = face_base.points;
+    printMatrix(face_points, 'face_points');
+    const face_lines = face_base.lines;
+    printMatrix(face_lines, 'face_lines');
+    const face_triangles = face_base.triangles;
+    printMatrix(face_triangles, 'face_triangles');
+
+    // Create the points
+    const default_triangle = math.transpose([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1 / 2, Math.sqrt(3) / 2, 0.0],
+    ]);
+    triangles.forEach((t, i) => {
+        // if (i !== 0) return;
+        const M = getTransformationMatrix(default_triangle, t);
+        // Add a z and a 1 to each point
+        const fp = face_points.map((p) => [...p, 1.0]);
+        const fl = face_lines.map((l) => l.map((p) => [...p, 1.0]));
+        const ft = face_triangles.map((t) => t.map((p) => [...p, 1.0]));
+        // Now transform the points
+        let transformed_points = math.multiply(M, math.transpose(fp));
+        let transformed_lines = fl.map((l) => math.multiply(M, math.transpose(l)));
+        let transformed_triangles = ft.map((t) => math.multiply(M, math.transpose(t)));
+        // remove the 1
+        transformed_points = math.transpose(transformed_points).map((p) => p.slice(0, 3));
+        transformed_lines = transformed_lines.map((l) => math.transpose(l).map((p) => p.slice(0, 3)));
+        transformed_triangles = transformed_triangles.map((t) => math.transpose(t).map((p) => p.slice(0, 3)));
+
+        // Now normalize the points to the unit sphere
+        transformed_points = transformed_points.map((p) => math.multiply(p, 1 / math.norm(p) * 1.0002));
+        transformed_lines = transformed_lines.map((l) => l.map((p) => math.multiply(p, 1 / math.norm(p) * 1.0001)));
+        transformed_triangles = transformed_triangles.map((t) => t.map((p) => math.multiply(p, 1 / math.norm(p))));
+
+        // Color the points
+        const pToC = (p, use_sat = true) => {
+            const phi = Math.atan2(p[1], p[0]); // azimuthal angle [-pi, pi]
+            const theta = Math.acos(p[2]); // polar angle [0, pi]
+
+            const hue = phi / (2.0 * Math.PI) + 0.5; // map to [0, 1]
+            const saturation = use_sat ? theta / Math.PI / 4 + 0.6 : 1; // map to [0, 1]
+            const lightness = 0.5; // for maximum brightness in HSL
+
+            const color = new THREE.Color();
+            color.setHSL(hue, saturation, lightness);
+            return [color.r, color.g, color.b];
+        };
+
+        let _point_colors = transformed_points.map((p) => pToC(p, false));
+        let point_colors = new Float32Array(_point_colors.length * 3);
+        _point_colors.forEach((c, i) => {
+            point_colors[i * 3 + 0] = c[0];
+            point_colors[i * 3 + 1] = c[1];
+            point_colors[i * 3 + 2] = c[2];
+        });
+        let _line_colors = transformed_lines.map((l) => l.map((p) => pToC(p), false));
+        let line_colors = new Float32Array(_line_colors.length * 3 * 2);
+        _line_colors.forEach((c, i) => {
+            c.forEach((c2, j) => {
+                line_colors[i * 3 * 2 + j * 3 + 0] = c2[0];
+                line_colors[i * 3 * 2 + j * 3 + 1] = c2[1];
+                line_colors[i * 3 * 2 + j * 3 + 2] = c2[2];
+            });
+        });
+        // Color the triangles
+        let _triangle_colors = transformed_triangles.map((t) => t.map((p) => pToC(p)));
+        let triangle_colors = new Float32Array(_triangle_colors.length * 3 * 3);
+        _triangle_colors.forEach((c, i) => {
+            c.forEach((c2, j) => {
+                triangle_colors[i * 3 * 3 + j * 3 + 0] = c2[0];
+                triangle_colors[i * 3 * 3 + j * 3 + 1] = c2[1];
+                triangle_colors[i * 3 * 3 + j * 3 + 2] = c2[2];
+            });
+        });
+
+        // Draw the points
+        const material = new THREE.PointsMaterial({ vertexColors: true, size: 0.1 });
+        const geometry = new THREE.BufferGeometry();
+        const vertices = new Float32Array(transformed_points.flat());
+        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(point_colors, 3));
+        const pointsGeometry = new THREE.Points(geometry, material);
+        // scene.add(pointsGeometry);
+
+        // Draw the lines
+        const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 6 });
+        const lineGeometry = new THREE.BufferGeometry();
+        const lineVertices = new Float32Array(math.flatten(transformed_lines));
+        lineGeometry.setAttribute('position', new THREE.BufferAttribute(lineVertices, 3));
+        lineGeometry.setAttribute('color', new THREE.BufferAttribute(line_colors, 3));
+        const lineObject = new THREE.LineSegments(lineGeometry, lineMaterial);
+        // scene.add(lineObject);
+
+        // Draw the triangles
+        const triangleMaterial = new THREE.MeshToonMaterial({ side: THREE.DoubleSide, vertexColors: true });
+        const triangleGeometry = new THREE.BufferGeometry();
+        const triangleVertices = new Float32Array(math.flatten(transformed_triangles));
+        triangleGeometry.setAttribute('position', new THREE.BufferAttribute(triangleVertices, 3));
+        triangleGeometry.setAttribute('color', new THREE.BufferAttribute(triangle_colors, 3));
+        triangleMaterial.flatShading = true;
+        const triangleObject = new THREE.Mesh(triangleGeometry, triangleMaterial);
+        
+        scene.add(triangleObject);
+        scene.add(lineObject);
+        scene.add(pointsGeometry);
+
+    });
+}
+
+function getTransformationMatrix(t0, t1) {
+    // Get the transformation matrix from t0 to t1
+    // Let's try this again, but try to get the transformation matrix as the inverse of 4 vectors in the triangle, along with their centroid
+    const P = math.transpose([
+        [...math.flatten(math.column(t0, 0)), 1],
+        [...math.flatten(math.column(t0, 1)), 1],
+        [...math.flatten(math.column(t0, 2)), 1],
+        [...math.flatten(
+            math.cross(
+                math.subtract(
+                    math.flatten(
+                        math.column(t0, 2)),
+                    math.flatten(
+                        math.column(t0, 0)
+                    )
+                ),
+                math.subtract(
+                    math.flatten(
+                        math.column(t0, 1)
+                    ),
+                    math.flatten(
+                        math.column(t0, 0)
+                    )
+                )
+            )
+        ),
+            0],
+    ]);
+    const Q = math.transpose([
+        [...math.flatten(math.column(t1, 0)), 1],
+        [...math.flatten(math.column(t1, 1)), 1],
+        [...math.flatten(math.column(t1, 2)), 1],
+        [...math.flatten(
+            math.cross(
+                math.subtract(
+                    math.flatten(
+                        math.column(t1, 2)
+                    ),
+                    math.flatten(
+                        math.column(t1, 0)
+                    )
+                ),
+                math.subtract(
+                    math.flatten(
+                        math.column(t1, 1)
+                    ),
+                    math.flatten(
+                        math.column(t1, 0)
+                    )
+                )
+            )
+        ),
+            0],
+    ]);
+    // Compute inverse of P and Q
+    const P_inv = math.inv(P);
+    const Q_inv = math.inv(Q);
+    // Compute M
+    let M = math.multiply(Q, P_inv);
+    // printMatrix(M, 'M');
+    return M;
+}
+
+// Returns the location of the point for the intersection of 60 degree lines with offsets p and q
+function intersect60(p, q) {
+    const m = 1.0 / Math.sqrt(3.0);
+    const y = (q - p) / 2.0 / m;
+    const x = (p + q) / 2.0;
+    return [x, -y, 0.0];
+}
+
+function generateDomeFace(v) {
+    const layers = []; // Array of layers, layers contain their points
+    // v is the dome frequency (# of times to subdivide the triange)
+    for (let p = 0; p <= v + 1; p++) {
+        layers.push([]);
+        const layer = layers[p];
+        for (let q = 0; q <= v + 1; q++) {
+            if (p < q) continue;
+            const origin = intersect60(p, q);
+            layer.push(math.multiply(origin, 1 / (v + 1)));
+        }
+    }
+
+    const triangles = [];
+    const triangle_colors = [];
+    const triangle = (p1, p2, p3, color) => {
+        triangles.push([p1, p2, p3]);
+        triangle_colors.push(color);
+    };
+    // Draw the triangles
+    for (let p = 0; p < layers.length - 1; p++) {
+        // Draw the triangles in the layer to the next layer
+        const layer = layers[p];
+        const nextLayer = layers[p + 1];
+        for (let q = 0; q < nextLayer.length - 1; q++) {
+            triangle(layer[q], nextLayer[q], nextLayer[q + 1], FILL_TRIANGLE);
+            if (p > q) {
+                triangle(layer[q], layer[q + 1], nextLayer[q + 1], FILL_TRIANGLE2)
+            }
+        }
+    }
+
+    const lines = [];
+    const line = (p1, p2) => {
+        lines.push([p1, p2]);
+    };
+    // Connect points with lines
+    for (let p = 1; p < layers.length; p++) {
+        // First connect adjacent points in the same layer
+        const layer = layers[p];
+        for (let q = 0; q < layer.length - 1; q++) {
+            line(layer[q], layer[q + 1]);
+        }
+        // Now connect each point in previous layer to the current layer (2 new lines each)
+        const prevLayer = layers[p - 1];
+        for (let q = 0; q < prevLayer.length; q++) {
+            line(prevLayer[q], layer[q]);
+            line(prevLayer[q], layer[q + 1]);
+        }
+    }
+
+    const points = [];
+    const point = (p) => {
+        points.push(p);
+    };
+    // Draw the points on top
+    for (let p = 0; p < layers.length; p++) {
+        const layer = layers[p];
+        for (let q = 0; q < layer.length; q++) {
+            point(layer[q]);
+        }
+    }
+
+    return {
+        points,
+        lines,
+        triangles,
+    };
 }
 
 // function drawLine() {
@@ -368,6 +636,57 @@ function drawDome() {
 //     return sprite;
 // }
 
+function printMatrix(matrix, name = undefined) {
+    const log = (name, ...args) => name === undefined ? console.log(...args) : console.log(name, ...args);
+    if (matrix instanceof math.Matrix) {
+        // return console.log(...(matrix.map((value) => value)));
+        return log(name, ...matrix._data);
+    }
+    log(name, ...matrix);
+}
+
+function getNormalVector(t) {
+    // Always return the normal vector pointing outwards
+    const normal1 = math.cross(
+        math.subtract(
+            math.flatten(
+                math.column(t, 2)
+            ),
+            math.flatten(
+                math.column(t, 0)
+            )
+        ),
+        math.subtract(
+            math.flatten(
+                math.column(t, 1)
+            ),
+            math.flatten(
+                math.column(t, 0)
+            )
+        )
+    );
+    const normal2 = math.cross(
+        math.subtract(
+            math.flatten(
+                math.column(t, 1)
+            ),
+            math.flatten(
+                math.column(t, 0)
+            )
+        ),
+        math.subtract(
+            math.flatten(
+                math.column(t, 2)
+            ),
+            math.flatten(
+                math.column(t, 0)
+            )
+        )
+    );
+    const p0 = math.flatten(math.column(t, 0));
+    return math.dot(normal1, p0) > 0 ? normal1 : normal2;
+}
+
 function createTextLabel(text, color) {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
@@ -385,4 +704,38 @@ function createTextLabel(text, color) {
     const label = new THREE.Mesh(geometry, material);
 
     return label;
+}
+
+function findTriangleCentroid(triangle) {
+    // Find the centroid of a triangle
+    // printMatrix(triangle, 'triangle');
+    // printMatrix(math.flatten(math.column(triangle, 0)), 'skjdf')
+    const centroid = math.multiply(math.add(math.flatten(math.column(triangle, 0)), math.flatten(math.column(triangle, 1)), math.flatten(math.column(triangle, 2))), 1 / 3);
+    // printMatrix(centroid, 'centroid');
+    return centroid;
+}
+
+function drawVector(origin, direction, length, color = 0xff0000) {
+    // Convert the origin and direction to THREE.Vector3
+    const originVector = new THREE.Vector3(...origin);
+    let directionVector = new THREE.Vector3(...direction);
+
+    // Normalize the direction vector to get a unit vector
+    directionVector.normalize();
+
+    // Scale the direction vector to the desired length
+    directionVector.multiplyScalar(length);
+
+    // Calculate the end point by adding the scaled direction vector to the origin
+    const endPoint = originVector.clone().add(directionVector);
+
+    // Create a line geometry from the origin to the end point
+    const geometry = new THREE.BufferGeometry().setFromPoints([originVector, endPoint]);
+
+    // Create a line material
+    const material = new THREE.LineBasicMaterial({ color });
+
+    // Create a line and add it to the scene
+    const line = new THREE.Line(geometry, material);
+    scene.add(line);
 }
