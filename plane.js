@@ -12,7 +12,7 @@ const params = {
     v_num: 0,
     showHelpers: false,
     showText: false,
-    camera: CAM_PERSPECTIVE,
+    camera: CAM_ORTHO,
 };
 const N_VERTICES = 12;
 // const N_EDGES = N_VERTICES * 2;
@@ -296,8 +296,8 @@ function drawTriangles() {
             [1 / 2, Math.sqrt(3) / 2, 0.0],
         ],
         [
-            [0.0, -0.5, 0.8090169943749475],
             [-0.8090169943749475, 0.0, 0.5],
+            [0.0, -0.5, 0.8090169943749475],
             [0.0, 0.5, 0.8090169943749475],
         ],
         // [
@@ -315,41 +315,154 @@ function drawTriangles() {
     // console.log(triangles.toString());
     // console.log(triangles[0]);
     // triangles.forEach((triangle) => triangle.forEach((vertex) => console.log(vertex)));
+    triangles = triangles.map((triangle) => math.transpose(triangle));
     triangles.forEach((triangle, i) => printMatrix(triangle, `triangle_${i}`));
 
-    const U = math.identity(3);
-    // const U = triangles[1];
-    // const [Q, b] = Matrix3TranslateToOrigin(math.subtract(triangles[1], triangles[0]));
-    const [Q, b] = Matrix3TranslateToOrigin(triangles[1]);
-    // const [Q, b] = Matrix3TranslateToOrigin(math.identity(3));
+    // const U = math.identity(3);
+    // // const U = triangles[1];
+    // // const [Q, b] = Matrix3TranslateToOrigin(math.subtract(triangles[1], triangles[0]));
+    // const [Q, b] = Matrix3TranslateToOrigin(triangles[1]);
+    // // const [Q, b] = Matrix3TranslateToOrigin(math.identity(3));
+    // printMatrix(Q, 'Q');
+    // printMatrix(b, 'b');
+    // // Compute R - the rotation matrix
+    // // R = Q*inv(U)
+    // const U_inv = math.inv(U); // This is still the identity matrix
+    // printMatrix(U_inv, 'U_inv');
+    // const R = math.multiply(Q, U_inv);
+    // printMatrix(R, 'R');
+    // // Create the translation matrix using b = p1
+    // // M = [R, b; 0, 0, 0, 1]
+    // let M = math.identity(4);
+    // // Insert R into M
+    // M = math.subset(M, math.index(math.range(0, 3), math.range(0, 3)), R);
+    // // Insert b into M
+    // M = math.subset(M, math.index(math.range(0, 3), 3), b);
+    // printMatrix(M, 'M');
+
+    // Let's try this again, but try to get the transformation matrix as the inverse of 4 vectors in the triangle, along with their centroid
+    // M = P * inv(Q)
+    // P = [p1, p2, p3, centroid_0; 0, 0, 0, 1]
+    // Q = [p1, p2, p3, centroid_1; 0, 0, 0, 1]
+    // const P = [
+    //     ExtendPoint3(MatrixGetColumn(triangles[0], 0)),
+    //     ExtendPoint3(MatrixGetColumn(triangles[0], 1)),
+    //     ExtendPoint3(MatrixGetColumn(triangles[0], 2)),
+    //     ExtendPoint3(findTriangleCentroid(triangles[0]))
+    // ];
+    // const Q = [
+    //     ExtendPoint3(MatrixGetColumn(triangles[1], 0)),
+    //     ExtendPoint3(MatrixGetColumn(triangles[1], 1)),
+    //     ExtendPoint3(MatrixGetColumn(triangles[1], 2)),
+    //     ExtendPoint3(findTriangleCentroid(triangles[1]))
+    // ];
+    printMatrix(math.column(triangles[0], 0));
+    console.log(math.subtract(math.flatten(math.column(triangles[0], 1)), math.flatten(math.column(triangles[0], 0))));
+    printMatrix(math.cross(
+        math.subtract(
+            math.flatten(
+                math.column(triangles[1], 1)
+            ),
+            math.flatten(
+                math.column(triangles[1], 0)
+            )
+        ), 
+        math.subtract(
+            math.flatten(
+                math.column(triangles[1], 2)
+            ),
+            math.flatten(
+                math.column(triangles[1], 0)
+            )
+        )));
+    const P = math.transpose([
+        [...math.flatten(math.column(triangles[0], 0)), 1],
+        [...math.flatten(math.column(triangles[0], 1)), 1],
+        [...math.flatten(math.column(triangles[0], 2)), 1],
+        [...math.multiply(
+                math.flatten(
+                    math.cross(
+                        math.subtract(
+                            math.flatten(
+                                math.column(triangles[0], 2)),
+                                math.flatten(
+                                    math.column(triangles[0], 0)
+                                )
+                            ),
+                        math.subtract(
+                            math.flatten(
+                                math.column(triangles[0], 1)
+                            ),
+                            math.flatten(
+                                math.column(triangles[0], 0)
+                            )
+                        )
+                    )
+                ), 1),
+        // [1, 1, 1,
+            0],
+        // [1, 0, 0, 0]
+        // [1, 1, 1, 1],
+    ]);
+    const Q = math.transpose([
+        [...math.flatten(math.column(triangles[1], 0)), 1],
+        [...math.flatten(math.column(triangles[1], 1)), 1],
+        [...math.flatten(math.column(triangles[1], 2)), 1],
+        [...math.multiply(
+                math.flatten(
+                    math.cross(
+                        math.subtract(
+                            math.flatten(
+                                math.column(triangles[1], 2)
+                            ),
+                            math.flatten(
+                                math.column(triangles[1], 0)
+                            )
+                        ),
+                        math.subtract(
+                            math.flatten(
+                                math.column(triangles[1], 1)
+                            ),
+                            math.flatten(
+                                math.column(triangles[1], 0)
+                            )
+                        )
+                    )
+                ), 1),
+        // [1, 1, 1,
+            0],
+        // [1, 0, 0, 0]
+        // [1, 1, 1, 1],
+    ]);
+    printMatrix(P, 'P');
     printMatrix(Q, 'Q');
-    printMatrix(b, 'b');
-    // Compute R - the rotation matrix
-    // R = Q*inv(U)
-    const U_inv = math.inv(U); // This is still the identity matrix
-    printMatrix(U_inv, 'U_inv');
-    const R = math.multiply(Q, U_inv);
-    printMatrix(R, 'R');
-    // Create the translation matrix using b = p1
-    // M = [R, b; 0, 0, 0, 1]
-    let M = math.identity(4);
-    // Insert R into M
-    M = math.subset(M, math.index(math.range(0, 3), math.range(0, 3)), R);
-    // Insert b into M
-    M = math.subset(M, math.index(math.range(0, 3), 3), b);
+    // Computer inverse of Q
+    const P_inv = math.inv(P);
+    const Q_inv = math.inv(Q);
+    printMatrix(Q_inv, 'Q_inv');
+    // Compute M
+    // let M = math.multiply(P, Q_inv);
+    let M = math.multiply(Q, P_inv);
     printMatrix(M, 'M');
 
-    const T1 = [
+    const T1 = math.transpose([
         [1, 0, 0],
         [0, 1, 0],
         [0, 0, 0],
-    ];
+    ]);
+    // const T1 = math.clone(triangles[0]);
+    triangles.push(T1);
     // Now we would like to apply the transformation to the above triangle
-    let T1_ = math.identity(4);
+    // let T1_ = math.identity(4);
+    let T1_ = math.transpose([
+        [...math.flatten(math.column(T1, 0)), 1],
+        [...math.flatten(math.column(T1, 1)), 1],
+        [...math.flatten(math.column(T1, 2)), 1],
+    ]);
     // Insert 1's into the last column of T1_
     // T1_ = math.subset(T1_, math.index(math.range(0, 3), 3), math.ones(3));
     // Insert T1 into T1_
-    T1_ = math.subset(T1_, math.index(math.range(0, 3), math.range(0, 3)), T1);
+    // T1_ = math.subset(T1_, math.index(math.range(0, 3), math.range(0, 3)), T1);
     printMatrix(T1_, 'T1_');
     // T1_ = T1_.map((e) => ExtendPoint3(e));
     // printMatrix(T1_, 'T1_');
@@ -357,7 +470,8 @@ function drawTriangles() {
     printMatrix(T2, 'T2');
     T2 = math.subset(T2, math.index(math.range(0, 3), math.range(0, 3)));
     printMatrix(T2, 'T2');
-    triangles.push(T2._data);
+    // triangles.push(math.transpose(T2));
+    triangles.push(T2);
 
     // console.log(ExtendVector3([1, 2, 3]))
     // console.log(ExtendPoint3([1, 2, 3]))
@@ -375,8 +489,9 @@ function drawTriangles() {
     // const T3 = applySpatialTransformation(transformation, T1);
     // triangles.push(T3._data);
 
-    const colors = [0xff0000, 0x0000ff, 0xffffff, 0x00ff00]; // red and blue
+    const colors = [0xff0000, 0x0000ff, 0xffffff, 0x00ff00, 0xff00ff]; // red and blue
     triangles.forEach((triangle, index) => {
+        triangle = math.transpose(triangle);
         const geometry = new THREE.BufferGeometry();
         const vertices = new Float32Array(triangle.flat());
         const indices = new Uint16Array([0, 1, 2]);
@@ -419,8 +534,10 @@ function drawTriangles() {
 
 function findTriangleCentroid(triangle) {
     // Find the centroid of a triangle
-    const centroid = math.multiply(math.add(triangle[0], triangle[1], triangle[2]), 1 / 3);
-    printMatrix(centroid);
+    // printMatrix(triangle, 'triangle');
+    // printMatrix(math.flatten(math.column(triangle, 0)), 'skjdf')
+    const centroid = math.multiply(math.add(math.flatten(math.column(triangle, 0)), math.flatten(math.column(triangle, 1)), math.flatten(math.column(triangle, 2))), 1 / 3);
+    // printMatrix(centroid, 'centroid');
     return centroid;
 }
 
