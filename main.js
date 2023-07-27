@@ -7,18 +7,27 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const CAM_PERSPECTIVE = 0;
 const CAM_ORTHO = 1;
 
-let camera, scene, renderer;
+let camera, scene, renderer, controls, helpers;
 const params = {
-    v_num: 30,
+    v_num: 1,
     showHelpers: false,
     showText: false,
     camera: CAM_PERSPECTIVE,
+    drawFaces: true,
+    drawLines: true,
+    drawPoints: false,
+    drawIcoFaces: false,
+    drawIcoLines: false,
+    drawIcoPoints: false,
+    drawIcoNormals: false,
+    drawIcoPointOrder: false,
 };
 const N_VERTICES = 12;
 const FILL_TRIANGLE = new THREE.Color(0xff0000);
 const FILL_TRIANGLE2 = new THREE.Color(0x0000ff);
 const N_EDGES = 30;
 let labels = [];
+let lights = [];
 
 if (WebGL.isWebGLAvailable()) {
     init();
@@ -42,55 +51,42 @@ function init() {
     document.body.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
-    const camera_perspective = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 200);
-    const camera_ortho = new THREE.OrthographicCamera(window.innerWidth / -600, window.innerWidth / 600, window.innerHeight / 600, window.innerHeight / -600, 1, 200);
 
-    // Select camera based on params
-    camera = params.camera === CAM_PERSPECTIVE ? camera_perspective : camera_ortho;
-    camera.position.set(-1.5, 2.5, 3.0);
+    initLights();
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.addEventListener('change', render); // use only if there is no animation loop
-    controls.minDistance = 1;
-    controls.maxDistance = 10;
-    controls.enablePan = false;
+    // GUI
+    const gui = new GUI();
+    // Add camera selector
+    gui.add(params, 'camera', { perspective: CAM_PERSPECTIVE, orthographic: CAM_ORTHO }).name('camera').onChange(onParamsChange);
+    gui.add(params, 'v_num', 0, 100).step(1).onChange(onParamsChange);
+    // Add toggle for xyz axes
+    helpers = new THREE.AxesHelper(5);
+    gui.add(params, 'showHelpers').name('show helpers').onChange(onParamsChange);
+    gui.add(params, 'showText').name('show text').onChange(onParamsChange);
+    // Add faces, lines, and points toggles
+    gui.add(params, 'drawFaces').name('draw faces').onChange(onParamsChange);
+    gui.add(params, 'drawLines').name('draw lines').onChange(onParamsChange);
+    gui.add(params, 'drawPoints').name('draw points').onChange(onParamsChange);
+    gui.add(params, 'drawIcoFaces').name('draw icosahedron faces').onChange(onParamsChange);
+    gui.add(params, 'drawIcoLines').name('draw icosahedron lines').onChange(onParamsChange);
+    gui.add(params, 'drawIcoPoints').name('draw icosahedron points').onChange(onParamsChange);
+    gui.add(params, 'drawIcoNormals').name('draw icosahedron normals').onChange(onParamsChange);
+    gui.add(params, 'drawIcoPointOrder').name('draw icosahedron point order').onChange(onParamsChange);
 
+    onParamsChange();
+
+    window.addEventListener('resize', onWindowResize);
+}
+
+function initLights() {
     const light1 = new THREE.HemisphereLight(0xffffff, 0x080808, 4.5);
     light1.position.set(-1.25, 1, 1.25);
     light1.intensity = 1.1;
     const light2 = new THREE.HemisphereLight(0xffffff, 0x080808, 4.5);
     light2.position.set(1.25, 1, -1.25);
     light2.intensity = 0.5;
-    scene.add(light1);
-    scene.add(light2);
-
-    // GUI
-    const gui = new GUI();
-    // // Add camera selector
-    // gui.add(params, 'camera', { perspective: CAM_PERSPECTIVE, orthographic: CAM_ORTHO }).name('camera').onChange((value) => {
-    //     params.camera = value;
-    //     camera = params.camera === CAM_PERSPECTIVE ? camera_perspective : camera_ortho;
-    //     onWindowResize();
-    // });
-    gui.add(params, 'v_num', 0, 100).step(1).onChange(render);
-    // Add toggle for xyz axes
-    const helpers = new THREE.AxesHelper(5);
-    helpers.visible = params.showHelpers;
-    scene.add(helpers);
-    gui.add(params, 'showHelpers').name('show helpers').onChange((value) => {
-        params.showHelpers = helpers.visible = value;
-        render();
-    });
-    gui.add(params, 'showText').name('show text').onChange((value) => {
-        params.showText = value;
-        drawDome();
-        render();
-    });
-
-    // drawCube();
-    drawDome();
-
-    window.addEventListener('resize', onWindowResize);
+    lights.push(light1);
+    lights.push(light2);
 }
 
 
@@ -98,6 +94,34 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    render();
+}
+
+function onParamsChange() {
+    // Select camera based on params
+    const camera_perspective = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 200);
+    const camera_ortho = new THREE.OrthographicCamera(window.innerWidth / -600, window.innerWidth / 600, window.innerHeight / 600, window.innerHeight / -600, 1, 200);
+    camera = params.camera === CAM_PERSPECTIVE ? camera_perspective : camera_ortho;
+    camera.position.set(-1.5, 2.5, 3.0);
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.addEventListener('change', render); // use only if there is no animation loop
+    controls.minDistance = 1;
+    controls.maxDistance = 10;
+    controls.enablePan = false;
+
+    // Remove all objects from the scene
+    scene.children = [];
+
+    // Add the lights back
+    lights.forEach((l) => scene.add(l));
+
+    // Add the helpers back
+    helpers.visible = params.showHelpers;
+    scene.add(helpers);
+
+    // Add the objects back
+    drawDome();
+
     render();
 }
 
@@ -110,15 +134,6 @@ function render() {
     }
 
     renderer.render(scene, camera);
-}
-
-function drawCube() {
-    // Cube
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshNormalMaterial();
-    const cube = new THREE.Mesh(geometry, material);
-    scene.add(cube);
-    return cube;
 }
 
 function drawDome() {
@@ -148,11 +163,11 @@ function drawDome() {
         // The edge generation is highly dependent on the order of the points
         const x_neg = -2 * ((i + 0) / 2 % 2 >= 1) + 1;
         const y_neg = -2 * ((i + 1) / 2 % 2 >= 1) + 1;
-        console.log(
-            xi * (xi === 0 ? x_neg : 1) * (xi == 1 ? y_neg : 1),
-            yi * (yi === 0 ? x_neg : 1) * (yi == 1 ? y_neg : 1),
-            zi * (zi === 0 ? x_neg : 1) * (zi == 1 ? y_neg : 1)
-        );
+        // console.log(
+        //     xi * (xi === 0 ? x_neg : 1) * (xi == 1 ? y_neg : 1),
+        //     yi * (yi === 0 ? x_neg : 1) * (yi == 1 ? y_neg : 1),
+        //     zi * (zi === 0 ? x_neg : 1) * (zi == 1 ? y_neg : 1)
+        // );
         // const x_neg = 1, y_neg = 1;
         let x = p0[0] * x_neg;
         let y = p0[1] * y_neg;
@@ -192,7 +207,7 @@ function drawDome() {
             labels.push(label);
         }
     }
-    // scene.add(pointsGeometry);
+    if (params.drawIcoPoints) scene.add(pointsGeometry);
 
     // Create the edges
     // Create a material
@@ -205,7 +220,7 @@ function drawDome() {
     const edgeColors = [];
     const ind = [];
     const edgeIndices = [];
-    console.log(pointColors);
+    // console.log(pointColors);
     const addEdge = (i, j) => {
         if (i === j) return;
         const s = [i, j].sort().toString();
@@ -236,9 +251,9 @@ function drawDome() {
             addEdge(i, (i + 6) % N_VERTICES);
         }
     }
-    console.log(edges.length);
+    // console.log(edges.length);
     edgeIndices.sort();
-    console.log(edgeIndices);
+    // console.log(edgeIndices);
     // Create arrays for the vertices and colors
     const edgesVertices = new Float32Array(N_EDGES * 2 * 3);
     const edgesVertexColors = new Float32Array(N_EDGES * 2 * 3);
@@ -268,9 +283,9 @@ function drawDome() {
     const lineObject = new THREE.LineSegments(edgesGeometry, edgesMaterial);
     const lineObject2 = new THREE.Line(geometry, edgesMaterial);
     // Add the line to the scene
-    // scene.add(lineObject);
+    if (params.drawIcoLines) scene.add(lineObject);
     // Use this to draw the order of the points
-    // scene.add(lineObject2);
+    if (params.drawIcoPointOrder) scene.add(lineObject2);
 
     // Create the faces
     // Create the triangle index array
@@ -317,7 +332,7 @@ function drawDome() {
         }
     }
     indices.sort();
-    console.log(indices);
+    // console.log(indices);
     indices.forEach((i) => {
         const p0 = points[i[0]];
         const p1 = points[i[1]];
@@ -325,7 +340,7 @@ function drawDome() {
         const q0 = [p0.x, p0.y, p0.z];
         const q1 = [p1.x, p1.y, p1.z];
         const q2 = [p2.x, p2.y, p2.z];
-        console.log(q0, q1, q2);
+        // console.log(q0, q1, q2);
         // console.log(points[i[0]], points[i[1]], points[i[2]]);
     });
     const trianglesFlat = new Uint16Array(indices.length);
@@ -340,7 +355,7 @@ function drawDome() {
     geometry.setIndex(indices.flat());
     const faceMesh = new THREE.Mesh(geometry, faceMaterial);
     // Add the mesh to the scene
-    // scene.add(faceMesh);
+    if (params.drawIcoFaces) scene.add(faceMesh);
 
     // Draw all of the normal vectors as lines from the triangle centers
     let triangles = indices.map((i) => [points[i[0]], points[i[1]], points[i[2]]]);
@@ -348,21 +363,21 @@ function drawDome() {
     // Sort in order to get outward facing normals -- Put the most negative point first
     // triangles = triangles.map((t) => t.sort((a, b) => math.subtract(math.sum(a), math.sum(b))));
     triangles = triangles.map((t) => math.transpose(t));
-    triangles.forEach((t, i) => printMatrix(t, `Triangle ${i}`));
-    triangles.forEach((t, i) => [0, 0, 0].forEach((_, j) => console.log(`Triangle ${i}, ${j}`, math.norm(math.flatten(math.column(t, j))))));
+    // triangles.forEach((t, i) => printMatrix(t, `Triangle ${i}`));
+    // triangles.forEach((t, i) => [0, 0, 0].forEach((_, j) => console.log(`Triangle ${i}, ${j}`, math.norm(math.flatten(math.column(t, j))))));
     const normals = triangles.map((t) => getNormalVector(t));
     const centroids = triangles.map((t) => findTriangleCentroid(t));
-    // triangles.forEach((t, i) => drawVector(centroids[i], normals[i], 0.1));
+    if (params.drawIcoNormals) triangles.forEach((t, i) => drawVector(centroids[i], normals[i], 0.1));
 
     // Subdivide the triangles
     const v = params.v_num;
     const face_base = generateDomeFace(v);
     const face_points = face_base.points;
-    printMatrix(face_points, 'face_points');
+    // printMatrix(face_points, 'face_points');
     const face_lines = face_base.lines;
-    printMatrix(face_lines, 'face_lines');
+    // printMatrix(face_lines, 'face_lines');
     const face_triangles = face_base.triangles;
-    printMatrix(face_triangles, 'face_triangles');
+    // printMatrix(face_triangles, 'face_triangles');
 
     // Create the points
     const default_triangle = math.transpose([
@@ -394,10 +409,11 @@ function drawDome() {
         // Color the points
         const pToC = (p, use_sat = true) => {
             const phi = Math.atan2(p[1], p[0]); // azimuthal angle [-pi, pi]
-            const theta = Math.acos(p[2]); // polar angle [0, pi]
+            let theta = Math.acos(p[2]); // polar angle [0, pi]
+            if (isNaN(theta)) theta = 1.0;
 
             const hue = phi / (2.0 * Math.PI) + 0.5; // map to [0, 1]
-            const saturation = use_sat ? theta / Math.PI / 4 + 0.6 : 1; // map to [0, 1]
+            const saturation = use_sat ? theta / Math.PI / 4 + 0.6 : 0.5; // map to [0, 1]
             const lightness = 0.5; // for maximum brightness in HSL
 
             const color = new THREE.Color();
@@ -439,7 +455,6 @@ function drawDome() {
         geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
         geometry.setAttribute('color', new THREE.BufferAttribute(point_colors, 3));
         const pointsGeometry = new THREE.Points(geometry, material);
-        // scene.add(pointsGeometry);
 
         // Draw the lines
         const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 6 });
@@ -448,7 +463,6 @@ function drawDome() {
         lineGeometry.setAttribute('position', new THREE.BufferAttribute(lineVertices, 3));
         lineGeometry.setAttribute('color', new THREE.BufferAttribute(line_colors, 3));
         const lineObject = new THREE.LineSegments(lineGeometry, lineMaterial);
-        // scene.add(lineObject);
 
         // Draw the triangles
         const triangleMaterial = new THREE.MeshToonMaterial({ side: THREE.DoubleSide, vertexColors: true });
@@ -458,10 +472,10 @@ function drawDome() {
         triangleGeometry.setAttribute('color', new THREE.BufferAttribute(triangle_colors, 3));
         triangleMaterial.flatShading = true;
         const triangleObject = new THREE.Mesh(triangleGeometry, triangleMaterial);
-        
-        scene.add(triangleObject);
-        scene.add(lineObject);
-        // scene.add(pointsGeometry);
+
+        if (params.drawFaces) scene.add(triangleObject);
+        if (params.drawLines) scene.add(lineObject);
+        if (params.drawPoints) scene.add(pointsGeometry);
 
     });
 }
