@@ -9,7 +9,7 @@ const CAM_ORTHO = 1;
 
 let camera, scene, renderer;
 const params = {
-    v_num: 1,
+    v_num: 30,
     showHelpers: false,
     showText: false,
     camera: CAM_PERSPECTIVE,
@@ -57,6 +57,7 @@ function init() {
 
     const light1 = new THREE.HemisphereLight(0xffffff, 0x080808, 4.5);
     light1.position.set(-1.25, 1, 1.25);
+    light1.intensity = 1.1;
     const light2 = new THREE.HemisphereLight(0xffffff, 0x080808, 4.5);
     light2.position.set(1.25, 1, -1.25);
     light2.intensity = 0.5;
@@ -460,7 +461,7 @@ function drawDome() {
         
         scene.add(triangleObject);
         scene.add(lineObject);
-        scene.add(pointsGeometry);
+        // scene.add(pointsGeometry);
 
     });
 }
