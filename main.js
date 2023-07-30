@@ -11,11 +11,10 @@ let camera, scene, renderer, controls, helpers;
 let camera_perspective, camera_ortho, cameras;
 
 const N_VERTICES = 12;
-const FILL_TRIANGLE = new THREE.Color(0xff0000);
-const FILL_TRIANGLE2 = new THREE.Color(0x0000ff);
 const N_EDGES = 30;
 let labels = [];
 let lights = [];
+let totalTransformationTime = 0;
 
 // Get the user's preferences from cookies
 const cookieParams = document.cookie.split('; ').reduce((acc, cookie) => {
@@ -59,6 +58,7 @@ const ico = {
     drawFaces: undefined,           // Function to add faces to the scene
     drawNormals: undefined,         // Function to add normals to the scene
     // drawPointOrder: undefined,      // Function to add point order to the scene
+    transformationMatrices: undefined,  // Store the 4x4 transformation matrices for efficiency.
 };
 
 if (WebGL.isWebGLAvailable()) {
@@ -445,14 +445,19 @@ function drawDome() {
     const face_base = generateDomeFace(v);
     const face_points = face_base.points;
     // printMatrix(face_points, 'face_points');
+    console.log(face_points[0])
     const face_lines = face_base.lines;
     // printMatrix(face_lines, 'face_lines');
     const face_triangles = face_base.triangles;
     // printMatrix(face_triangles, 'face_triangles');
     // Add a z and a 1 to each point
+    // face_points.map((p, i) => console.log(p.length, p, i));
     const fp = face_points.map((p) => [...p, 1.0]);
-    const fl = face_lines.map((l) => l.map((p) => [...p, 1.0]));
-    const ft = face_triangles.map((t) => t.map((p) => [...p, 1.0]));
+    // all values are point arrays...
+    // const fl = face_lines.map((l) => l.map((p) => [...p, 1.0]));
+    // const ft = face_triangles.map((t) => t.map((p) => [...p, 1.0]));
+
+    // line and triangle values are point indices
 
     // Create the points
     const default_triangle = math.transpose([
@@ -460,18 +465,25 @@ function drawDome() {
         [1.0, 0.0, 0.0],
         [1 / 2, Math.sqrt(3) / 2, 0.0],
     ]);
+    if (ico.transformationMatrices ?? 1) ico.transformationMatrices = ico.triangles.map((t) => getTransformationMatrix(default_triangle, t));
+    console.log(ico.transformationMatrices);
+    console.log(`Generating Transformation Matrices took ${totalTransformationTime} ms.`)
     ico.triangles.forEach((t, i) => {
         // console.log(`Triangle ${i}`, t);
         // if (i !== 0) return;
-        const M = getTransformationMatrix(default_triangle, t);
+        const M = ico.transformationMatrices[i];
         // Now transform the points
         let transformed_points = math.multiply(M, math.transpose(fp));
-        let transformed_lines = fl.map((l) => math.multiply(M, math.transpose(l)));
-        let transformed_triangles = ft.map((t) => math.multiply(M, math.transpose(t)));
+        // let transformed_lines = fl.map((l) => math.multiply(M, math.transpose(l)));
+        // let transformed_triangles = ft.map((t) => math.multiply(M, math.transpose(t)));
         // remove the 1
         transformed_points = math.transpose(transformed_points).map((p) => p.slice(0, 3));
-        transformed_lines = transformed_lines.map((l) => math.transpose(l).map((p) => p.slice(0, 3)));
-        transformed_triangles = transformed_triangles.map((t) => math.transpose(t).map((p) => math.multiply(p.slice(0, 3), params.normalizeToSphere ? 1 : 1.00005)));
+        // transformed_lines = transformed_lines.map((l) => math.transpose(l).map((p) => p.slice(0, 3)));
+        // transformed_triangles = transformed_triangles.map((t) => math.transpose(t).map((p) => math.multiply(p.slice(0, 3), params.normalizeToSphere ? 1 : 1.00005)));
+        let transformed_lines = face_lines.map((l) => l.map((pi) => transformed_points[pi]));
+        let transformed_triangles = face_triangles.map((t) => t.map((pi) => transformed_points[pi]));
+        // printMatrix(transformed_lines, 'transformed_lines');
+        // printMatrix(transformed_triangles, 'transformed_triangles');
 
         // Now normalize the points to the unit sphere
         if (params.normalizeToSphere) {
@@ -559,6 +571,8 @@ function drawDome() {
 }
 
 function getTransformationMatrix(t0, t1) {
+    let startTime = performance.now();
+
     // Get the transformation matrix from t0 to t1
     // Let's try this again, but try to get the transformation matrix as the inverse of 4 vectors in the triangle, along with their centroid
     const P = math.transpose([
@@ -618,6 +632,11 @@ function getTransformationMatrix(t0, t1) {
     // Compute M
     let M = math.multiply(Q, P_inv);
     // printMatrix(M, 'M');
+
+    let endTime = performance.now();
+    // console.log(`getTransformationMatrix() took ${startTime - endTime} ms.`);
+    totalTransformationTime += endTime - startTime;
+
     return M;
 }
 
@@ -632,7 +651,10 @@ function intersect60(p, q) {
 function generateDomeFace(v) {
     let startTime = performance.now();
 
-    const layers = []; // Array of layers, layers contain their points
+    const points = []; // Array of actual point values on x, y plane
+    const lines = []; // Array of point indeces for lines
+    const triangles = []; // Array of point indices for triangles
+    const layers = []; // Array of layers, layers contain their point indices
     // v is the dome frequency (# of times to subdivide the triange)
     for (let p = 0; p <= v + 1; p++) {
         layers.push([]);
@@ -640,11 +662,13 @@ function generateDomeFace(v) {
         for (let q = 0; q <= v + 1; q++) {
             if (p < q) continue;
             const origin = intersect60(p, q);
-            layer.push(math.multiply(origin, 1 / (v + 1)));
+            // Total edge length = 1
+            const point = math.multiply(origin, 1 / (v + 1));
+            layer.push(points.length);
+            points.push(point);
         }
     }
 
-    const triangles = [];
     const triangle_colors = [];
     const triangle = (p1, p2, p3, color) => {
         triangles.push([p1, p2, p3]);
@@ -656,14 +680,15 @@ function generateDomeFace(v) {
         const layer = layers[p];
         const nextLayer = layers[p + 1];
         for (let q = 0; q < nextLayer.length - 1; q++) {
-            triangle(layer[q], nextLayer[q], nextLayer[q + 1], FILL_TRIANGLE);
+            // Add triangles which go up from current point
+            triangle(layer[q], nextLayer[q], nextLayer[q + 1], 0);
             if (p > q) {
-                triangle(layer[q], layer[q + 1], nextLayer[q + 1], FILL_TRIANGLE2)
+                // Add triangles which go down from current point conditionally
+                triangle(layer[q], layer[q + 1], nextLayer[q + 1], 1)
             }
         }
     }
 
-    const lines = [];
     const line = (p1, p2) => {
         lines.push([p1, p2]);
     };
@@ -682,17 +707,16 @@ function generateDomeFace(v) {
         }
     }
 
-    const points = [];
-    const point = (p) => {
-        points.push(p);
-    };
-    // Draw the points on top
-    for (let p = 0; p < layers.length; p++) {
-        const layer = layers[p];
-        for (let q = 0; q < layer.length; q++) {
-            point(layer[q]);
-        }
-    }
+    // const point = (p) => {
+    //     points.push(p);
+    // };
+    // // Draw the points on top
+    // for (let p = 0; p < layers.length; p++) {
+    //     const layer = layers[p];
+    //     for (let q = 0; q < layer.length; q++) {
+    //         point(layer[q]);
+    //     }
+    // }
 
     let endTime = performance.now();
     console.log(`generateDomeFace took ${endTime - startTime} ms.`)
