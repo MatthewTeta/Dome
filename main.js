@@ -8,26 +8,58 @@ const CAM_PERSPECTIVE = 0;
 const CAM_ORTHO = 1;
 
 let camera, scene, renderer, controls, helpers;
-const params = {
-    v_num: 1,
-    showHelpers: false,
-    showText: false,
-    camera: CAM_PERSPECTIVE,
-    drawFaces: true,
-    drawLines: true,
-    drawPoints: false,
-    drawIcoFaces: false,
-    drawIcoLines: false,
-    drawIcoPoints: false,
-    drawIcoNormals: false,
-    drawIcoPointOrder: false,
-};
+let camera_perspective, camera_ortho, cameras;
+
 const N_VERTICES = 12;
 const FILL_TRIANGLE = new THREE.Color(0xff0000);
 const FILL_TRIANGLE2 = new THREE.Color(0x0000ff);
 const N_EDGES = 30;
 let labels = [];
 let lights = [];
+
+// Get the user's preferences from cookies
+const cookieParams = document.cookie.split('; ').reduce((acc, cookie) => {
+    const [name, value] = cookie.split('=');
+    if (name === 'params') {
+        return JSON.parse(decodeURIComponent(value));
+    }
+    return acc;
+}, {});
+
+// Merge the cookie preferences with the default preferences
+const params = {
+    v_num: 1,
+    showHelpers: cookieParams.showHelpers ?? false,
+    showText: cookieParams.showText ?? false,
+    camera: cookieParams.camera ?? CAM_PERSPECTIVE,
+    drawFaces: cookieParams.drawFaces ?? true,
+    drawEdges: cookieParams.drawEdges ?? true,
+    drawPoints: cookieParams.drawPoints ?? false,
+    drawNormals: cookieParams.drawNormals ?? false,
+    drawIcoFaces: cookieParams.drawIcoFaces ?? false,
+    drawIcoEdges: cookieParams.drawIcoEdges ?? false,
+    drawIcoPoints: cookieParams.drawIcoPoints ?? false,
+    drawIcoNormals: cookieParams.drawIcoNormals ?? false,
+    // drawIcoPointOrder: false,
+    normalizeToSphere: cookieParams.normalizeToSphere ?? true,
+};
+
+const ico = {
+    vertices: undefined,            // Array of vertices
+    edges: undefined,               // Array of edges
+    triangles: undefined,           // Array of triangles for each face
+    // pointsGeometry: undefined,      // Geometry for points
+    // edgesGeometry: undefined,       // Geometry for edges
+    // pointsOrderGeometry: undefined, // Geometry for point order
+    // faceGeometry: undefined,        // Geometry for faces
+    normals: undefined,             // Array of normals
+    centroids: undefined,           // Array of centroids
+    drawPoints: undefined,          // Function to add points to the scene
+    drawEdges: undefined,           // Function to add edges to the scene
+    drawFaces: undefined,           // Function to add faces to the scene
+    drawNormals: undefined,         // Function to add normals to the scene
+    // drawPointOrder: undefined,      // Function to add point order to the scene
+};
 
 if (WebGL.isWebGLAvailable()) {
     init();
@@ -53,6 +85,7 @@ function init() {
     scene = new THREE.Scene();
 
     initLights();
+    initCamera();
 
     // GUI
     const gui = new GUI();
@@ -62,17 +95,20 @@ function init() {
     // Add toggle for xyz axes
     helpers = new THREE.AxesHelper(5);
     gui.add(params, 'showHelpers').name('show helpers').onChange(onParamsChange);
-    gui.add(params, 'showText').name('show text').onChange(onParamsChange);
     // Add faces, lines, and points toggles
     gui.add(params, 'drawFaces').name('draw faces').onChange(onParamsChange);
-    gui.add(params, 'drawLines').name('draw lines').onChange(onParamsChange);
+    gui.add(params, 'drawEdges').name('draw edges').onChange(onParamsChange);
     gui.add(params, 'drawPoints').name('draw points').onChange(onParamsChange);
+    gui.add(params, 'drawNormals').name('draw normals').onChange(onParamsChange);
     gui.add(params, 'drawIcoFaces').name('draw icosahedron faces').onChange(onParamsChange);
-    gui.add(params, 'drawIcoLines').name('draw icosahedron lines').onChange(onParamsChange);
+    gui.add(params, 'drawIcoEdges').name('draw icosahedron edges').onChange(onParamsChange);
     gui.add(params, 'drawIcoPoints').name('draw icosahedron points').onChange(onParamsChange);
     gui.add(params, 'drawIcoNormals').name('draw icosahedron normals').onChange(onParamsChange);
-    gui.add(params, 'drawIcoPointOrder').name('draw icosahedron point order').onChange(onParamsChange);
+    // gui.add(params, 'drawIcoPointOrder').name('draw icosahedron point order').onChange(onParamsChange);
+    // gui.add(params, 'showText').name('show text').onChange(onParamsChange);
+    gui.add(params, 'normalizeToSphere').name('normalize to sphere').onChange(onParamsChange);
 
+    generateIcosahedron();
     onParamsChange();
 
     window.addEventListener('resize', onWindowResize);
@@ -89,25 +125,36 @@ function initLights() {
     lights.push(light2);
 }
 
+function initCamera() {
+    camera_perspective = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 200);
+    camera_ortho = new THREE.OrthographicCamera(window.innerWidth / -600, window.innerWidth / 600, window.innerHeight / 600, window.innerHeight / -600, 1, 200);
+    cameras = [camera_perspective, camera_ortho];
+    cameras.forEach((c) => {
+        c.position.set(-1.5, 2.5, 3.0);
+        controls = new OrbitControls(c, renderer.domElement);
+        controls.addEventListener('change', render); // use only if there is no animation loop
+        controls.minDistance = 1;
+        controls.maxDistance = 10;
+        controls.enablePan = false;
+    });
+}
+
 
 function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    cameras.forEach((c) => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+    });
     renderer.setSize(window.innerWidth, window.innerHeight);
     render();
 }
 
 function onParamsChange() {
+    // Save the user's preferences to cookies
+    document.cookie = `params=${encodeURIComponent(JSON.stringify(params))}`;
+
     // Select camera based on params
-    const camera_perspective = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 200);
-    const camera_ortho = new THREE.OrthographicCamera(window.innerWidth / -600, window.innerWidth / 600, window.innerHeight / 600, window.innerHeight / -600, 1, 200);
     camera = params.camera === CAM_PERSPECTIVE ? camera_perspective : camera_ortho;
-    camera.position.set(-1.5, 2.5, 3.0);
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.addEventListener('change', render); // use only if there is no animation loop
-    controls.minDistance = 1;
-    controls.maxDistance = 10;
-    controls.enablePan = false;
 
     // Remove all objects from the scene
     scene.children = [];
@@ -120,13 +167,19 @@ function onParamsChange() {
     scene.add(helpers);
 
     // Add the objects back
+    if (params.drawIcoPoints) ico.drawPoints();
+    if (params.drawIcoEdges) ico.drawEdges();
+    if (params.drawIcoPointOrder) ico.drawPointOrder();
+    if (params.drawIcoFaces) ico.drawFaces();
+    if (params.drawIcoNormals) ico.drawNormals();
     drawDome();
 
     render();
 }
 
+
 function render() {
-    if (labels.length > 0) {
+    if (params.showText && labels.length > 0) {
         // Make all labels face the camera
         for (let i = 0; i < N_VERTICES; i++) {
             labels[i].lookAt(camera.position);
@@ -136,8 +189,10 @@ function render() {
     renderer.render(scene, camera);
 }
 
-function drawDome() {
-    // Geodesic Dome
+function generateIcosahedron() {
+    // This function generates an icosahedron and returns the vertices and faces
+    // and can be run once at initialization
+    let startTime = performance.now();
 
     // Create the points
     // Create a material
@@ -198,6 +253,7 @@ function drawDome() {
     var pointsGeometry = new THREE.Points(geometry, material);
     // Add the point to the scene
     if (params.showText) {
+        labels = [];
         // Add text labels
         for (let i = 0; i < N_VERTICES; i++) {
             const label = createTextLabel(i.toString(), 'white');
@@ -207,7 +263,9 @@ function drawDome() {
             labels.push(label);
         }
     }
-    if (params.drawIcoPoints) scene.add(pointsGeometry);
+    ico.vertices = vertices;
+    // ico.pointsGeometry = pointsGeometry;
+    ico.drawPoints = () => scene.add(pointsGeometry);
 
     // Create the edges
     // Create a material
@@ -280,12 +338,13 @@ function drawDome() {
     edgesGeometry.setAttribute('position', new THREE.BufferAttribute(edgesVertices, 3));
     edgesGeometry.setAttribute('color', new THREE.BufferAttribute(edgesVertexColors, 3));
     // Create the line object
-    const lineObject = new THREE.LineSegments(edgesGeometry, edgesMaterial);
-    const lineObject2 = new THREE.Line(geometry, edgesMaterial);
-    // Add the line to the scene
-    if (params.drawIcoLines) scene.add(lineObject);
-    // Use this to draw the order of the points
-    if (params.drawIcoPointOrder) scene.add(lineObject2);
+    const icoEdges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+    // const icoPointOrderLines = new THREE.Line(edgesGeometry, edgesMaterial);
+    ico.edges = icoEdges;
+    // ico.edgesGeometry = icoEdges;
+    // ico.pointsOrderGeometry = icoPointOrderLines;
+    ico.drawEdges = () => scene.add(icoEdges);
+    // ico.drawPointOrder = () => scene.add(icoPointOrderLines);
 
     // Create the faces
     // Create the triangle index array
@@ -354,8 +413,8 @@ function drawDome() {
     faceMaterial.flatShading = true;
     geometry.setIndex(indices.flat());
     const faceMesh = new THREE.Mesh(geometry, faceMaterial);
-    // Add the mesh to the scene
-    if (params.drawIcoFaces) scene.add(faceMesh);
+    // ico.facesGeometry = geometry;
+    ico.drawFaces = () => scene.add(faceMesh);
 
     // Draw all of the normal vectors as lines from the triangle centers
     let triangles = indices.map((i) => [points[i[0]], points[i[1]], points[i[2]]]);
@@ -367,7 +426,19 @@ function drawDome() {
     // triangles.forEach((t, i) => [0, 0, 0].forEach((_, j) => console.log(`Triangle ${i}, ${j}`, math.norm(math.flatten(math.column(t, j))))));
     const normals = triangles.map((t) => getNormalVector(t));
     const centroids = triangles.map((t) => findTriangleCentroid(t));
-    if (params.drawIcoNormals) triangles.forEach((t, i) => drawVector(centroids[i], normals[i], 0.1));
+    ico.triangles = triangles;
+    ico.normals = normals;
+    ico.centroids = centroids;
+    ico.drawNormals = () => triangles.forEach((t, i) => drawVector(centroids[i], normals[i], 0.1));
+
+    let endTime = performance.now();
+    console.log(`Time to create icosahedron: ${endTime - startTime} ms`);
+}
+
+function drawDome() {
+    // Geodesic Dome
+    // https://en.wikipedia.org/wiki/Geodesic_dome
+    let startTime = performance.now();
 
     // Subdivide the triangles
     const v = params.v_num;
@@ -378,6 +449,10 @@ function drawDome() {
     // printMatrix(face_lines, 'face_lines');
     const face_triangles = face_base.triangles;
     // printMatrix(face_triangles, 'face_triangles');
+    // Add a z and a 1 to each point
+    const fp = face_points.map((p) => [...p, 1.0]);
+    const fl = face_lines.map((l) => l.map((p) => [...p, 1.0]));
+    const ft = face_triangles.map((t) => t.map((p) => [...p, 1.0]));
 
     // Create the points
     const default_triangle = math.transpose([
@@ -385,13 +460,10 @@ function drawDome() {
         [1.0, 0.0, 0.0],
         [1 / 2, Math.sqrt(3) / 2, 0.0],
     ]);
-    triangles.forEach((t, i) => {
+    ico.triangles.forEach((t, i) => {
+        // console.log(`Triangle ${i}`, t);
         // if (i !== 0) return;
         const M = getTransformationMatrix(default_triangle, t);
-        // Add a z and a 1 to each point
-        const fp = face_points.map((p) => [...p, 1.0]);
-        const fl = face_lines.map((l) => l.map((p) => [...p, 1.0]));
-        const ft = face_triangles.map((t) => t.map((p) => [...p, 1.0]));
         // Now transform the points
         let transformed_points = math.multiply(M, math.transpose(fp));
         let transformed_lines = fl.map((l) => math.multiply(M, math.transpose(l)));
@@ -399,14 +471,17 @@ function drawDome() {
         // remove the 1
         transformed_points = math.transpose(transformed_points).map((p) => p.slice(0, 3));
         transformed_lines = transformed_lines.map((l) => math.transpose(l).map((p) => p.slice(0, 3)));
-        transformed_triangles = transformed_triangles.map((t) => math.transpose(t).map((p) => p.slice(0, 3)));
+        transformed_triangles = transformed_triangles.map((t) => math.transpose(t).map((p) => math.multiply(p.slice(0, 3), params.normalizeToSphere ? 1 : 1.00005)));
 
         // Now normalize the points to the unit sphere
-        transformed_points = transformed_points.map((p) => math.multiply(p, 1 / math.norm(p) * 1.0002));
-        transformed_lines = transformed_lines.map((l) => l.map((p) => math.multiply(p, 1 / math.norm(p) * 1.0001)));
-        transformed_triangles = transformed_triangles.map((t) => t.map((p) => math.multiply(p, 1 / math.norm(p))));
+        if (params.normalizeToSphere) {
+            transformed_points = transformed_points.map((p) => math.multiply(p, 1 / math.norm(p) * 1.0002));
+            transformed_lines = transformed_lines.map((l) => l.map((p) => math.multiply(p, 1 / math.norm(p) * 1.0001)));
+            transformed_triangles = transformed_triangles.map((t) => t.map((p) => math.multiply(p, 1 / math.norm(p))));
+        }
 
         // Color the points
+        // TODO: Add more color options
         const pToC = (p, use_sat = true) => {
             const phi = Math.atan2(p[1], p[0]); // azimuthal angle [-pi, pi]
             let theta = Math.acos(p[2]); // polar angle [0, pi]
@@ -474,10 +549,13 @@ function drawDome() {
         const triangleObject = new THREE.Mesh(triangleGeometry, triangleMaterial);
 
         if (params.drawFaces) scene.add(triangleObject);
-        if (params.drawLines) scene.add(lineObject);
+        if (params.drawEdges) scene.add(lineObject);
         if (params.drawPoints) scene.add(pointsGeometry);
 
     });
+
+    let endTime = performance.now();
+    console.log(`Rendered in ${endTime - startTime} ms`);
 }
 
 function getTransformationMatrix(t0, t1) {
@@ -552,6 +630,8 @@ function intersect60(p, q) {
 }
 
 function generateDomeFace(v) {
+    let startTime = performance.now();
+
     const layers = []; // Array of layers, layers contain their points
     // v is the dome frequency (# of times to subdivide the triange)
     for (let p = 0; p <= v + 1; p++) {
@@ -613,6 +693,9 @@ function generateDomeFace(v) {
             point(layer[q]);
         }
     }
+
+    let endTime = performance.now();
+    console.log(`generateDomeFace took ${endTime - startTime} ms.`)
 
     return {
         points,
