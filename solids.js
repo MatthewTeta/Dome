@@ -184,7 +184,7 @@ function generate() {
 
 function draw() {
     // First generate roots of unity (n >= 2) over [0, pi] in vertical plane
-    let ROOTS_LAYERS = [3, 8, 3, 8, 3];
+    let ROOTS_LAYERS = [3, 4, 5, 6, 7, 8, 9, 8, 7, 6, 5, 4 ,3];
     let ROOTS_VERT = ROOTS_LAYERS.length + 2;
 
     if (ROOTS_VERT < 1) return console.error("ROOTS_VERT must be at least 1");
@@ -203,7 +203,6 @@ function draw() {
         // generate roots of unity of order ROOTS_LAYERS[i]
         const y = math.cos(math.pi * layer_idx / (ROOTS_VERT - 1));
         const r = math.sin(math.pi * layer_idx / (ROOTS_VERT - 1));
-        // console.log(math.cos(math.pi / 4));
         const roots = ROOTS_LAYERS[layer_idx];
         let layer = [];
         for (let root_idx = 0; root_idx < roots; root_idx++) {
@@ -216,7 +215,6 @@ function draw() {
             points.push(p);
             layer.push(p);
         }
-        // points.push([0, y, 0]);
         layers.push(layer);
         // Generate triangles between points
         if (layer_idx === 0) continue;
@@ -227,7 +225,6 @@ function draw() {
             const n_triangles = math.add(prev_layer.length, layer.length);
             // determine which layer has more points
             // const [smaller_layer, larger_layer] = prev_layer.length < layer.length ? [prev_layer, layer] : [layer, prev_layer];
-            // console.log(prev_layer, layer);
 
             // Add triangles from top to bottom
             layer.forEach((p, i) => {
