@@ -189,6 +189,19 @@ function render() {
     renderer.render(scene, camera);
 }
 
+// TODO: Add more color options
+const pToC = (p, use_sat = true) => {
+    const phi = Math.atan2(p[1], p[0]); // azimuthal angle [-pi, pi]
+    let theta = Math.acos(p[2]); // polar angle [0, pi]
+    if (isNaN(theta)) theta = 1.0;
+    const hue = phi / (2.0 * Math.PI) + 0.5; // map to [0, 1]
+    const saturation = use_sat ? theta / Math.PI / 4 + 0.6 : 0.5; // map to [0, 1]
+    const lightness = 0.5; // for maximum brightness in HSL
+    const color = new THREE.Color();
+    color.setHSL(hue, saturation, lightness);
+    return [color.r, color.g, color.b];
+};
+
 function generateIcosahedron() {
     // This function generates an icosahedron and returns the vertices and faces
     // and can be run once at initialization
@@ -213,17 +226,10 @@ function generateIcosahedron() {
         xi %= 3;
         yi %= 3;
         zi %= 3;
-        // console.log(xi, yi, zi);
         // Copy original point with index offsets and negate either x or y coord (z is always 0)
         // The edge generation is highly dependent on the order of the points
         const x_neg = -2 * ((i + 0) / 2 % 2 >= 1) + 1;
         const y_neg = -2 * ((i + 1) / 2 % 2 >= 1) + 1;
-        // console.log(
-        //     xi * (xi === 0 ? x_neg : 1) * (xi == 1 ? y_neg : 1),
-        //     yi * (yi === 0 ? x_neg : 1) * (yi == 1 ? y_neg : 1),
-        //     zi * (zi === 0 ? x_neg : 1) * (zi == 1 ? y_neg : 1)
-        // );
-        // const x_neg = 1, y_neg = 1;
         let x = p0[0] * x_neg;
         let y = p0[1] * y_neg;
         let z = p0[2];
@@ -236,8 +242,6 @@ function generateIcosahedron() {
         vertices[i * 3 + 1] = p[yi];
         vertices[i * 3 + 2] = p[zi];
         points.push(new THREE.Vector3(p2[0], p2[1], p2[2]));
-        // console.log(vertices.slice(i * 3, i * 3 + 3));
-        // console.log(points[i]);
         // Set color based on vertex position
         const color = new THREE.Color();
         color.setHSL(i / N_VERTICES, 1.0, 0.5);
@@ -469,21 +473,14 @@ function drawDome() {
     console.log(ico.transformationMatrices);
     console.log(`Generating Transformation Matrices took ${totalTransformationTime} ms.`)
     ico.triangles.forEach((t, i) => {
-        // console.log(`Triangle ${i}`, t);
         // if (i !== 0) return;
         const M = ico.transformationMatrices[i];
         // Now transform the points
         let transformed_points = math.multiply(M, math.transpose(fp));
-        // let transformed_lines = fl.map((l) => math.multiply(M, math.transpose(l)));
-        // let transformed_triangles = ft.map((t) => math.multiply(M, math.transpose(t)));
         // remove the 1
         transformed_points = math.transpose(transformed_points).map((p) => p.slice(0, 3));
-        // transformed_lines = transformed_lines.map((l) => math.transpose(l).map((p) => p.slice(0, 3)));
-        // transformed_triangles = transformed_triangles.map((t) => math.transpose(t).map((p) => math.multiply(p.slice(0, 3), params.normalizeToSphere ? 1 : 1.00005)));
         let transformed_lines = face_lines.map((l) => l.map((pi) => transformed_points[pi]));
         let transformed_triangles = face_triangles.map((t) => t.map((pi) => transformed_points[pi]));
-        // printMatrix(transformed_lines, 'transformed_lines');
-        // printMatrix(transformed_triangles, 'transformed_triangles');
 
         // Now normalize the points to the unit sphere
         if (params.normalizeToSphere) {
@@ -493,21 +490,6 @@ function drawDome() {
         }
 
         // Color the points
-        // TODO: Add more color options
-        const pToC = (p, use_sat = true) => {
-            const phi = Math.atan2(p[1], p[0]); // azimuthal angle [-pi, pi]
-            let theta = Math.acos(p[2]); // polar angle [0, pi]
-            if (isNaN(theta)) theta = 1.0;
-
-            const hue = phi / (2.0 * Math.PI) + 0.5; // map to [0, 1]
-            const saturation = use_sat ? theta / Math.PI / 4 + 0.6 : 0.5; // map to [0, 1]
-            const lightness = 0.5; // for maximum brightness in HSL
-
-            const color = new THREE.Color();
-            color.setHSL(hue, saturation, lightness);
-            return [color.r, color.g, color.b];
-        };
-
         let _point_colors = transformed_points.map((p) => pToC(p, false));
         let point_colors = new Float32Array(_point_colors.length * 3);
         _point_colors.forEach((c, i) => {
