@@ -3,6 +3,8 @@ import * as math from 'mathjs';
 import WebGL from 'three/addons/capabilities/WebGL.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+import { VertexNormalsHelper } from 'three/addons/helpers/VertexNormalsHelper.js';
 
 const CAM_PERSPECTIVE = 0;
 const CAM_ORTHO = 1;
@@ -15,6 +17,7 @@ const N_EDGES = 30;
 let labels = [];
 let lights = [];
 let totalTransformationTime = 0;
+let downloadSTL = () => alert('Not yet generated.');
 
 // Get the user's preferences from cookies
 const cookieParams = document.cookie.split('; ').reduce((acc, cookie) => {
@@ -40,7 +43,10 @@ const params = {
     drawIcoPoints: cookieParams.drawIcoPoints ?? false,
     drawIcoNormals: cookieParams.drawIcoNormals ?? false,
     // drawIcoPointOrder: false,
+    drawFinalFaces: cookieParams.drawFinalFaces ?? true,
+    drawFinalNormals: cookieParams.drawFinalNormals ?? false,
     normalizeToSphere: cookieParams.normalizeToSphere ?? true,
+    domeDiameter: cookieParams.domeDiameter ?? 2.0,
 };
 
 const ico = {
@@ -105,8 +111,13 @@ function init() {
     gui.add(params, 'drawIcoPoints').name('draw icosahedron points').onChange(onParamsChange);
     gui.add(params, 'drawIcoNormals').name('draw icosahedron normals').onChange(onParamsChange);
     // gui.add(params, 'drawIcoPointOrder').name('draw icosahedron point order').onChange(onParamsChange);
+    gui.add(params, 'drawFinalFaces').name('draw final faces').onChange(onParamsChange);
+    gui.add(params, 'drawFinalNormals').name('draw final normals').onChange(onParamsChange);
     // gui.add(params, 'showText').name('show text').onChange(onParamsChange);
     gui.add(params, 'normalizeToSphere').name('normalize to sphere').onChange(onParamsChange);
+    // Add download STL options
+    gui.add(params, 'domeDiameter').name('dome diameter (mm)').onChange(onParamsChange);
+    gui.add({ downloadSTL: () => downloadSTL() }, 'downloadSTL').name('download STL');
 
     generateIcosahedron();
     onParamsChange();
@@ -190,7 +201,7 @@ function render() {
 }
 
 // TODO: Add more color options
-const pToC = (p, use_sat = true) => {
+function pToC (p, use_sat = true) {
     const phi = Math.atan2(p[1], p[0]); // azimuthal angle [-pi, pi]
     let theta = Math.acos(p[2]); // polar angle [0, pi]
     if (isNaN(theta)) theta = 1.0;
@@ -472,6 +483,10 @@ function drawDome() {
     if (ico.transformationMatrices ?? 1) ico.transformationMatrices = ico.triangles.map((t) => getTransformationMatrix(default_triangle, t));
     console.log(ico.transformationMatrices);
     console.log(`Generating Transformation Matrices took ${totalTransformationTime} ms.`)
+    let all_points = [];
+    let all_lines = [];
+    let all_triangles = [];
+
     ico.triangles.forEach((t, i) => {
         // if (i !== 0) return;
         const M = ico.transformationMatrices[i];
@@ -518,6 +533,7 @@ function drawDome() {
         });
 
         // Draw the points
+        all_points.push(transformed_points);
         const material = new THREE.PointsMaterial({ vertexColors: true, size: 0.1 });
         const geometry = new THREE.BufferGeometry();
         const vertices = new Float32Array(transformed_points.flat());
@@ -526,6 +542,7 @@ function drawDome() {
         const pointsGeometry = new THREE.Points(geometry, material);
 
         // Draw the lines
+        all_lines.push(transformed_lines);
         const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 6 });
         const lineGeometry = new THREE.BufferGeometry();
         const lineVertices = new Float32Array(math.flatten(transformed_lines));
@@ -534,19 +551,71 @@ function drawDome() {
         const lineObject = new THREE.LineSegments(lineGeometry, lineMaterial);
 
         // Draw the triangles
+        all_triangles.push(transformed_triangles);
         const triangleMaterial = new THREE.MeshToonMaterial({ side: THREE.DoubleSide, vertexColors: true });
         const triangleGeometry = new THREE.BufferGeometry();
         const triangleVertices = new Float32Array(math.flatten(transformed_triangles));
         triangleGeometry.setAttribute('position', new THREE.BufferAttribute(triangleVertices, 3));
         triangleGeometry.setAttribute('color', new THREE.BufferAttribute(triangle_colors, 3));
         triangleMaterial.flatShading = true;
-        const triangleObject = new THREE.Mesh(triangleGeometry, triangleMaterial);
+        const triangleObject = new THREE.Mesh(triangleGeometry, triangleMaterial);// Instantiate an exporter
 
         if (params.drawFaces) scene.add(triangleObject);
         if (params.drawEdges) scene.add(lineObject);
         if (params.drawPoints) scene.add(pointsGeometry);
 
     });
+
+    // Construct final geometry
+
+    // permute the points so normals are facing outward
+    all_triangles = all_triangles.map(f => f.map(t => {
+        const [_, n] = getNormalVector_(t);
+        if (!n) return t;
+        return [t[1], t[0], t[2]];
+    }));
+
+    // const finalMaterial = new THREE.MeshToonMaterial({ side: THREE.DoubleSide, vertexColors: true });
+    // const finalMaterial = new THREE.MeshToonMaterial({ side: THREE.DoubleSide, vertexColors: false });
+    const finalMaterial = new THREE.MeshNormalMaterial({ side: THREE.FrontSide, vertexColors: true });
+    const finalGeometry = new THREE.BufferGeometry();
+    const finalVertices = new Float32Array(math.flatten(all_triangles));
+    const finalColors = new Float32Array(math.flatten(all_triangles.map((f) => f.map((p) => p.map((p2) => pToC(p2, false))))));
+    // const finalNormals = new Float32Array(math.flatten(all_triangles.map((f) => f.map((t) => {
+    //     const n = getNormalVector(t);
+    //     // const n = [1, 0, 0];
+    //     // debugger;
+    //     return [...n, ...n, ...n];
+    //     // return n;
+    // }))));
+    finalMaterial.flatShading = true;
+    finalGeometry.setAttribute('position', new THREE.BufferAttribute(finalVertices, 3));
+    finalGeometry.setAttribute('color', new THREE.BufferAttribute(finalColors, 3));
+    // finalGeometry.setAttribute('normal', new THREE.BufferAttribute(finalNormals, 3));
+    finalGeometry.computeVertexNormals();
+    finalGeometry.normalizeNormals();
+    const mesh = new THREE.Mesh(finalGeometry, finalMaterial);
+    
+    // Scale the mesh to the dome diameter
+    const exportMesh = mesh.clone();
+    const scale = params.domeDiameter / 2.0;
+    exportMesh.scale.set(scale, scale, scale);
+    const exporter = new STLExporter();
+    // Configure export options
+    const options = { binary: true }
+    // Parse the input and generate the STL encoded output
+    const result = exporter.parse(exportMesh, options);
+    // Exoprt the STL file
+    const blob = new Blob([result], { type: 'application/octet-stream' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'dome.stl';
+    downloadSTL = () => link.click();
+
+    // Normals helper
+    const normals = new VertexNormalsHelper(mesh, 0.2, 0x00ff00);
+    if (params.drawFinalFaces) scene.add(mesh);
+    if (params.drawFinalNormals) scene.add(normals);
 
     let endTime = performance.now();
     console.log(`Rendered in ${endTime - startTime} ms`);
@@ -749,6 +818,30 @@ function printMatrix(matrix, name = undefined) {
     log(name, ...matrix);
 }
 
+function getNormalVector_(t) {
+    // Always return the normal vector pointing outwards
+    const normal1 = math.cross(
+        math.subtract(
+            math.flatten(
+                math.column(t, 2)
+            ),
+            math.flatten(
+                math.column(t, 0)
+            )
+        ),
+        math.subtract(
+            math.flatten(
+                math.column(t, 1)
+            ),
+            math.flatten(
+                math.column(t, 0)
+            )
+        )
+    );
+    const p0 = math.flatten(math.column(t, 0));
+    return [normal1, math.dot(normal1, p0) > 0];
+}
+
 function getNormalVector(t) {
     // Always return the normal vector pointing outwards
     const normal1 = math.cross(
@@ -788,7 +881,10 @@ function getNormalVector(t) {
         )
     );
     const p0 = math.flatten(math.column(t, 0));
-    return math.dot(normal1, p0) > 0 ? normal1 : normal2;
+    // let normal = math.add(normal1, math.column(t, 0));
+    let normal = normal1;
+    return math.dot(normal1, p0) > 0 ? normal : math.multiply(normal, -1);
+    // return math.dot(normal1, p0) > 0 ? normal1 : normal2;
 }
 
 function createTextLabel(text, color) {
